@@ -55,7 +55,7 @@
  ******************************************************************************/
 #define BUFSIZE 16384
 struct sockaddr_in serv_addr;
-
+char* concat(char *s1, char *s2);
 
 /*******************************************************************************
  * Training
@@ -284,16 +284,19 @@ static void dolabel(mdl_t *mdl) {
 					fclose(fin);
 				if (mdl->opt->output != NULL)
 					fclose(fout);
-				//char buf[BUFSIZE];
-				//while (fgets(buf, sizeof buf, fout)) {
-				//	printf("%s", buf);
-				//};
-				char *line = rdr_readline(fout);
-				//printf("Result:\n %s\n", line);
-				if (line == NULL)
-					break;
-				// Send to client
-				int w = write(connfd, line, strlen(line));
+				char buf[BUFSIZE];
+				char sentData[BUFSIZE];
+				char *sentText = &sentData[0];
+				sentText = concat(sentText, "");
+				while (fgets(buf, sizeof buf, fout)) {
+					char *line = &buf[0];
+					//printf("Result:\n %s\n", line);
+					if (line == NULL)
+						break;
+					// Send to client
+					sentText = concat(sentText, line);
+				};
+				int w = write(connfd, sentText, strlen(sentText));
 				printf("Sent %d\n", w);
 			} while (byte_count > 0);
 			exit(0);
@@ -330,6 +333,17 @@ static void dolabel(mdl_t *mdl) {
 			fclose(fout);
 	}
 }
+
+char* concat(char *s1, char *s2) {
+
+    size_t len1 = strlen(s1);
+    size_t len2 = strlen(s2);
+    char *result = malloc(len1 + len2 + 1); //+1 for the zero-terminator
+    memcpy(result, s1, len1);
+    memcpy(result + len1, s2, len2 + 1); //+1 to copy the null-terminator
+    return result;
+}
+
 
 /*******************************************************************************
  * Dumping
