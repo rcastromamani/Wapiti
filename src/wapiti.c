@@ -33,6 +33,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <time.h>
+#include <unistd.h>
+
 #include "decoder.h"
 #include "model.h"
 #include "options.h"
@@ -43,6 +49,13 @@
 #include "tools.h"
 #include "trainers.h"
 #include "wapiti.h"
+
+/*******************************************************************************
+ * Server
+ ******************************************************************************/
+#define BUFSIZE 16384
+struct sockaddr_in serv_addr;
+
 
 /*******************************************************************************
  * Training
@@ -196,27 +209,126 @@ static void dolabel(mdl_t *mdl) {
 	if (file == NULL)
 		pfatal("cannot open input model file");
 	mdl_load(mdl, file);
-	// Open input and output files
-	FILE *fin = stdin, *fout = stdout;
-	if (mdl->opt->input != NULL) {
-		fin = fopen(mdl->opt->input, "r");
-		if (fin == NULL)
-			pfatal("cannot open input data file");
+	if (mdl->opt->server) {
+		info("* Starting server\n");
+		int listenfd = 0, connfd = 0;
+		int byte_count;
+		char sendBuff[BUFSIZE];
+
+		listenfd = socket(AF_INET, SOCK_STREAM, 0);
+		memset(&serv_addr, '0', sizeof (serv_addr));
+		memset(sendBuff, '0', sizeof (sendBuff));
+
+		serv_addr.sin_family = AF_INET;
+		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		serv_addr.sin_port = htons(mdl->opt->port);
+
+		if (bind(listenfd, (struct sockaddr*) &serv_addr, sizeof (serv_addr)) < 0) {
+			pfatal("ERROR on binding");
+		} else {
+			printf("started server on port %d\n", mdl->opt->port);
+		}
+		listen(listenfd, 10);
+
+	while (1) {
+		connfd = accept(listenfd, (struct sockaddr*) NULL, NULL);
+		// fork child
+		int pid = fork();
+		if (pid < 0) {
+			pfatal("ERROR could not fork");
+		}
+		if (pid == 0) {
+			/* This is the client process */
+			close(listenfd);
+			do {
+				byte_count = recv(connfd, sendBuff, BUFSIZE, 0);
+				if (byte_count < 0) {
+					pfatal("ERROR reading from socket");
+				}
+				sendBuff[byte_count] = '\0';
+				char *lblstr = &sendBuff[0];
+				//printf("Haykusqa: %s\n", sendBuff);
+				// Writing to input
+				FILE *fin = tmpfile();
+				char buffer[BUFSIZE];
+
+				FILE *fout;
+				char *streambuffer;
+				size_t lengthstreambuffer;
+				fout = open_memstream (&streambuffer, &lengthstreambuffer);
+
+				fprintf(fin, "%s", lblstr);
+				rewind(fin);
+				//char buf[BUFSIZE];
+				//while (fgets(buf, sizeof buf, fin)) {
+				//	printf("%s", buf);
+				//};
+				if (mdl->opt->input != NULL) {
+					info("Input\n");
+					fin = fopen(mdl->opt->input, "r");
+					if (fin == NULL)
+						pfatal("cannot open input data file");
+				}
+				if (mdl->opt->output != NULL) {
+					info("Output\n");
+					fout = fopen(mdl->opt->output, "w");
+					if (fout == NULL)
+						pfatal("cannot open output data file");
+				}
+				// Do the labelling
+				info("* Label sequences\n");
+				tag_label(mdl, fin, fout);
+				info("* Done\n");
+				// And close files
+				if (mdl->opt->input != NULL)
+					fclose(fin);
+				if (mdl->opt->output != NULL)
+					fclose(fout);
+				//char buf[BUFSIZE];
+				//while (fgets(buf, sizeof buf, fout)) {
+				//	printf("%s", buf);
+				//};
+				char *line = rdr_readline(fout);
+				//printf("Result:\n %s\n", line);
+				if (line == NULL)
+					break;
+				// Send to client
+				int w = write(connfd, line, strlen(line));
+				printf("Sent %d\n", w);
+			} while (byte_count > 0);
+			exit(0);
+		} else {
+			close(connfd);
+		}
 	}
-	if (mdl->opt->output != NULL) {
-		fout = fopen(mdl->opt->output, "w");
-		if (fout == NULL)
-			pfatal("cannot open output data file");
+
+	close(connfd);
+	sleep(1);
+
 	}
-	// Do the labelling
-	info("* Label sequences\n");
-	tag_label(mdl, fin, fout);
-	info("* Done\n");
-	// And close files
-	if (mdl->opt->input != NULL)
-		fclose(fin);
-	if (mdl->opt->output != NULL)
-		fclose(fout);
+	else {
+		// Open input and output files
+		FILE *fin = stdin, *fout = stdout;
+		if (mdl->opt->input != NULL) {
+			fin = fopen(mdl->opt->input, "r");
+			if (fin == NULL)
+				pfatal("cannot open input data file");
+		}
+		if (mdl->opt->output != NULL) {
+			fout = fopen(mdl->opt->output, "w");
+			if (fout == NULL)
+				pfatal("cannot open output data file");
+		}
+		// Do the labelling
+		info("* Label sequences\n");
+		tag_label(mdl, fin, fout);
+		info("* Done\n");
+		// And close files
+		if (mdl->opt->input != NULL)
+			fclose(fin);
+		if (mdl->opt->output != NULL)
+			fclose(fout);
+	}
 }
 
 /*******************************************************************************

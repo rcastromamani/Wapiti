@@ -85,6 +85,9 @@ struct opt_s {
 	bool      lblpost;
 	uint32_t  nbest;
 	bool      force;
+	bool      server;
+	int       port;
+	char     *host;
 	// Options for model dump
 	int       prec;
 	bool      all;
