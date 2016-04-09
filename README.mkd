@@ -33,3 +33,13 @@ If you use Wapiti for research purpose, please use the following citation:
         url       = {http://www.aclweb.org/anthology/P10-1052}
     }
 
+### Server mode support for labelling
+
+We added support for a server mode (all the other options were not altered):
+
+```
+./wapiti label --server -P 5555 -m morph1.model
+```
+
+Still considering how to add a client mode.
+
