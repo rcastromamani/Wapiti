@@ -33,11 +33,13 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <sys/types.h> 
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <time.h>
 #include <unistd.h>
+#include <netdb.h>
 
 #include "decoder.h"
 #include "model.h"
@@ -210,103 +212,154 @@ static void dolabel(mdl_t *mdl) {
 		pfatal("cannot open input model file");
 	mdl_load(mdl, file);
 	if (mdl->opt->server) {
-		info("* Starting server\n");
-		int listenfd = 0, connfd = 0;
-		int byte_count;
-		char sendBuff[BUFSIZE];
 
-		listenfd = socket(AF_INET, SOCK_STREAM, 0);
-		memset(&serv_addr, '0', sizeof (serv_addr));
-		memset(sendBuff, '0', sizeof (sendBuff));
+  int parentfd; /* parent socket */
+  int childfd; /* child socket */
+  int portno; /* port to listen on */
+  int clientlen; /* byte size of client's address */
+  struct sockaddr_in serveraddr; /* server's addr */
+  struct sockaddr_in clientaddr; /* client addr */
+  struct hostent *hostp; /* client host info */
+  char buf[BUFSIZE]; /* message buffer */
+  char *hostaddrp; /* dotted decimal host addr string */
+  int optval; /* flag value for setsockopt */
+  int n; /* message byte size */
 
-		serv_addr.sin_family = AF_INET;
-		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-		serv_addr.sin_port = htons(mdl->opt->port);
+  portno = mdl->opt->port;
 
-		if (bind(listenfd, (struct sockaddr*) &serv_addr, sizeof (serv_addr)) < 0) {
-			pfatal("ERROR on binding");
-		} else {
-			printf("started server on port %d\n", mdl->opt->port);
-		}
-		listen(listenfd, 10);
+  /* 
+   * socket: create the parent socket 
+   */
+  parentfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (parentfd < 0) 
+    error("ERROR opening socket");
 
-	while (1) {
-		connfd = accept(listenfd, (struct sockaddr*) NULL, NULL);
-		// fork child
-		int pid = fork();
-		if (pid < 0) {
-			pfatal("ERROR could not fork");
-		}
-		if (pid == 0) {
-			/* This is the client process */
-			close(listenfd);
-			do {
-				byte_count = recv(connfd, sendBuff, BUFSIZE, 0);
-				if (byte_count < 0) {
-					pfatal("ERROR reading from socket");
-				}
-				sendBuff[byte_count] = '\0';
-				char *lblstr = &sendBuff[0];
-				//printf("Haykusqa: %s\n", sendBuff);
-				// Writing to input
-				FILE *fin = tmpfile();
-				char buffer[BUFSIZE];
+  /* setsockopt: Handy debugging trick that lets 
+   * us rerun the server immediately after we kill it; 
+   * otherwise we have to wait about 20 secs. 
+   * Eliminates "ERROR on binding: Address already in use" error. 
+   */
+  optval = 1;
+  setsockopt(parentfd, SOL_SOCKET, SO_REUSEADDR, 
+	     (const void *)&optval , sizeof(int));
 
-				FILE *fout;
-				char *streambuffer;
-				size_t lengthstreambuffer;
-				fout = open_memstream (&streambuffer, &lengthstreambuffer);
+  /*
+   * build the server's Internet address
+   */
+  bzero((char *) &serveraddr, sizeof(serveraddr));
 
-				fprintf(fin, "%s", lblstr);
-				rewind(fin);
-				//char buf[BUFSIZE];
-				//while (fgets(buf, sizeof buf, fin)) {
-				//	printf("%s", buf);
-				//};
-				if (mdl->opt->input != NULL) {
-					info("Input\n");
-					fin = fopen(mdl->opt->input, "r");
-					if (fin == NULL)
-						pfatal("cannot open input data file");
-				}
-				if (mdl->opt->output != NULL) {
-					info("Output\n");
-					fout = fopen(mdl->opt->output, "w");
-					if (fout == NULL)
-						pfatal("cannot open output data file");
-				}
-				// Do the labelling
-				info("* Label sequences\n");
-				tag_label(mdl, fin, fout);
-				info("* Done\n");
-				// And close files
-				if (mdl->opt->input != NULL)
-					fclose(fin);
-				if (mdl->opt->output != NULL)
-					fclose(fout);
-				char buf[BUFSIZE];
-				char sentData[BUFSIZE];
-				char *sentText = &sentData[0];
-				sentText = concat(sentText, "");
-				while (fgets(buf, sizeof buf, fout)) {
-					char *line = &buf[0];
-					//printf("Result:\n %s\n", line);
-					if (line == NULL)
-						break;
-					// Send to client
-					sentText = concat(sentText, line);
-				};
-				int w = write(connfd, sentText, strlen(sentText));
-				printf("Sent %d\n", w);
-			} while (byte_count > 0);
-			exit(0);
-		} else {
-			close(connfd);
-		}
-	}
+  /* this is an Internet address */
+  serveraddr.sin_family = AF_INET;
 
-	close(connfd);
-	sleep(1);
+  /* let the system figure out our IP address */
+  serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+  /* this is the port we will listen on */
+  serveraddr.sin_port = htons((unsigned short)portno);
+
+  /* 
+   * bind: associate the parent socket with a port 
+   */
+  if (bind(parentfd, (struct sockaddr *) &serveraddr, 
+	   sizeof(serveraddr)) < 0) 
+    error("ERROR on binding");
+
+  /* 
+   * listen: make this socket ready to accept connection requests 
+   */
+  if (listen(parentfd, 5) < 0) /* allow 5 requests to queue up */ 
+    error("ERROR on listen");
+
+  /* 
+   * main loop: wait for a connection request, echo input line, 
+   * then close connection.
+   */
+  clientlen = sizeof(clientaddr);
+
+  info("* Starting server\n");
+  while (1) {
+
+    /* 
+     * accept: wait for a connection request 
+     */
+    childfd = accept(parentfd, (struct sockaddr *) &clientaddr, (socklen_t*)&clientlen);
+    if (childfd < 0) 
+      error("ERROR on accept");
+    info("HOlaa...");
+    /* 
+     * gethostbyaddr: determine who sent the message 
+     */
+    //hostp = gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr, sizeof(clientaddr.sin_addr.s_addr), AF_INET);
+    //if (hostp == NULL)
+    //  error("ERROR on gethostbyaddr");
+    //hostaddrp = inet_ntoa(clientaddr.sin_addr);
+    //if (hostaddrp == NULL)
+    //  error("ERROR on inet_ntoa\n");
+    //printf("server established connection with %s (%s)\n", hostp->h_name, hostaddrp);
+    
+    /* 
+     * read: read input string from the client
+     */
+    bzero(buf, BUFSIZE);
+    n = read(childfd, buf, BUFSIZE);
+    if (n < 0) 
+      error("ERROR reading from socket");
+    printf("server received %d bytes: %s", n, buf);
+    
+    /* 
+     * write: echo the input string back to the client 
+     */
+    /* Creating Input and Output FILE objects */
+    FILE *fin = tmpfile();
+    char buffer[BUFSIZE];
+
+    FILE *fout;
+    char *streambuffer;
+    size_t lengthstreambuffer;
+    fout = open_memstream (&streambuffer, &lengthstreambuffer);
+    /* Writing the text obtained from the client into the Input File object */
+    char *lblstr = &buf[0];
+    fprintf(fin, "%s", lblstr);
+    rewind(fin);
+
+    if (mdl->opt->input != NULL) {
+      info("Input\n");
+      fin = fopen(mdl->opt->input, "r");
+      if (fin == NULL)
+        pfatal("cannot open input data file");
+    }
+    if (mdl->opt->output != NULL) {
+      info("Output\n");
+      fout = fopen(mdl->opt->output, "w");
+      if (fout == NULL)
+        pfatal("cannot open output data file");
+    }
+    // Do the labelling
+    info("* Label sequences\n");
+    tag_label(mdl, fin, fout);
+    info("* Done\n");
+    // And close files
+    if (mdl->opt->input != NULL)
+      fclose(fin);
+    if (mdl->opt->output != NULL)
+      fclose(fout);
+    char buffout[BUFSIZE];
+    char sentData[BUFSIZE];
+    char *sentText = &sentData[0];
+    sentText = concat(sentText, "");
+    while (fgets(buffout, sizeof buffout, fout)) {
+      char *line = &buffout[0];
+      if (line == NULL)
+        break;
+      sentText = concat(sentText, line);
+    };
+    /* Send to client */
+    n = write(childfd, sentText, strlen(sentText));
+    if (n < 0) 
+      error("ERROR writing to socket");
+
+    close(childfd);
+  }
 
 	}
 	else {
