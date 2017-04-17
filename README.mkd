@@ -38,7 +38,19 @@ If you use Wapiti for research purpose, please use the following citation:
 We added support for a server mode (all the other options were not altered):
 
 ```
-./wapiti label --server -P 5555 -m morph1.model
+# Descargando el modelo
+$ wget https://raw.githubusercontent.com/hinantin/squoia/master/MT_systems/models/3gram_enhancedAncora.model
+# Arrancando el servidor (se necesita al menos 6GB de RAM libre)
+$ ./wapiti label --server -P 5555 -m 3gram_enhancedAncora.model &
+
+# Probando el cliente
+$ cat wapitipaq.txt | perl wapitiClient.pl --port 5555 --host 127.0.0.1 --stdin
+$ cat wapitipaq.txt | perl wapitiClient.pl --port 5555 --host 127.0.0.1 --stdin
+$ cat wapitipaq.txt | perl wapitiClient.pl --port 5555 --host 127.0.0.1 --stdin
+$ cat wapitipaq.txt | perl wapitiClient.pl --port 5555 --host 127.0.0.1 --stdin
+# En alguno de los intentos lanzará el error que se encuentra en el siguiente archivo
+#./pattern.c:284:				fatal("missing end of pattern: %s", p);
+# He tratado de prevenir el error pero continua ejecutándose, no sé precisamente la razón.
 ```
 
 Still considering how to add a client mode.
