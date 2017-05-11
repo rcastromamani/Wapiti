@@ -326,13 +326,13 @@ static void dolabel(mdl_t *mdl) {
     rewind(fin);
 
     if (mdl->opt->input != NULL) {
-      info("Input\n");
+      //info("Input\n");
       fin = fopen(mdl->opt->input, "r");
       if (fin == NULL)
         pfatal("cannot open input data file");
     }
     if (mdl->opt->output != NULL) {
-      info("Output\n");
+      //info("Output\n");
       fout = fopen(mdl->opt->output, "w");
       if (fout == NULL)
         pfatal("cannot open output data file");
