@@ -285,7 +285,7 @@ static void dolabel(mdl_t *mdl) {
     childfd = accept(parentfd, (struct sockaddr *) &clientaddr, (socklen_t*)&clientlen);
     if (childfd < 0) 
       error("ERROR on accept");
-    info("HOlaa...");
+    info("RECEIVING THE DATA");
     /* 
      * gethostbyaddr: determine who sent the message 
      */
@@ -310,13 +310,16 @@ static void dolabel(mdl_t *mdl) {
      * write: echo the input string back to the client 
      */
     /* Creating Input and Output FILE objects */
-    FILE *fin = tmpfile();
+    /*
+     * We create an in-memory file with the tmpfile function 
+     */
+    FILE *fin = tmpfile(); /* creating and opening a temporary file with unique auto-generated filename */ 
     char buffer[BUFSIZE];
 
     FILE *fout;
     char *streambuffer;
     size_t lengthstreambuffer;
-    fout = open_memstream (&streambuffer, &lengthstreambuffer);
+    fout = open_memstream (&streambuffer, &lengthstreambuffer); /* stream associated with a dynamically allocated memory buffer */
     /* Writing the text obtained from the client into the Input File object */
     char *lblstr = &buf[0];
     fprintf(fin, "%s", lblstr);
@@ -343,6 +346,9 @@ static void dolabel(mdl_t *mdl) {
       fclose(fin);
     if (mdl->opt->output != NULL)
       fclose(fout);
+    /*
+     * Getting the resulting data from the labelling 
+     */
     char buffout[BUFSIZE];
     char sentData[BUFSIZE];
     char *sentText = &sentData[0];
