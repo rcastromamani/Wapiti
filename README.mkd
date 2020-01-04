@@ -38,10 +38,14 @@ If you use Wapiti for research purpose, please use the following citation:
 We added support for a server mode (all the other options were not altered):
 
 ```
+$ sudo apt install gcc
+$ git clone https://github.com/rcastromamani/Wapiti.git
+$ cd Wapiti
+$ make
 # Descargando el modelo
 $ wget https://raw.githubusercontent.com/hinantin/squoia/master/MT_systems/models/3gram_enhancedAncora.model
 # Arrancando el servidor (se necesita al menos 6GB de RAM libre)
-$ ./wapiti label --server -P 5555 -m 3gram_enhancedAncora.model &
+$ ./wapiti label --server -P 8888 -m 3gram_enhancedAncora.model &
 
 # Probando el cliente
 $ cat wapitipaq.txt | perl wapitiClient.pl --port 5555 --host 127.0.0.1 --stdin
